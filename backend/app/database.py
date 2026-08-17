@@ -226,56 +226,156 @@ SEED_BOOKS = [
 ]
 
 
-# Longer sample chapters (3 per seeded novel) — inserted only when a book has fewer than 3 chapters
+# Longer sample chapters (3 per seeded novel) — unique bodies per book title.
+# Inserted only when a book has fewer than 3 chapters (idempotent).
+SEED_CHAPTER_TEMPLATES = [
+    (
+        "Chapter 1: {hook}",
+        (
+            "The first light over {place} found {protagonist} already awake. "
+            "Years of careful routine had not prepared them for the message waiting on the table — "
+            "a single page that named secrets only {protagonist} and one other person in the world were supposed to know. "
+            "Outside, the wind carried the smell of rain and distant fire. "
+            "Inside, the clock ticked once, twice, and the decision that would rewrite every plan was made without a spoken word. "
+            "By noon the city would be talking. By nightfall, nothing would be the same. "
+            "This is where the story of {title} truly begins: not with a battle or a crown, but with a choice made in quiet rooms."
+        ),
+    ),
+    (
+        "Chapter 2: {mid}",
+        (
+            "Allies arrived in ones and twos, each carrying a different version of the truth. "
+            "{protagonist} listened, sorted lies from fear, and mapped the path that led into the heart of the problem. "
+            "The middle of a journey is always the hardest part: the beginning still feels reversible, the end is still a rumour. "
+            "In the markets of {place}, in the archives, and in the long conversations after midnight, "
+            "pieces of the larger design began to lock together. "
+            "Someone had been moving the pieces for a long time. Someone else was about to knock the board over. "
+            "When the second letter arrived — unsigned, but written in a hand {protagonist} recognised — "
+            "the cost of continuing became clear. So did the cost of stopping."
+        ),
+    ),
+    (
+        "Chapter 3: {turn}",
+        (
+            "Confrontation does not always look like a fight. Sometimes it looks like a closed door, a signature, "
+            "or a name spoken aloud in a room full of people who were never meant to hear it. "
+            "{protagonist} walked into the final meeting of the week with nothing left to hide and everything left to lose. "
+            "The rain had returned to {place}, streaking the glass and softening the edges of the skyline. "
+            "What followed was not neat. Plans broke. Loyalties shifted. A single act of honesty changed more than any carefully written contract. "
+            "When the chapter closed, {protagonist} stood on the far side of a line that could not be uncrossed. "
+            "The rest of {title} would be written from that side of the line — and the reader, for the first time, could feel the weight of it."
+        ),
+    ),
+]
+
+# Per-book flavour so chapters differ across the seed novels
+SEED_BOOK_FLAVOUR = {
+    "River (Revised version)": {
+        "protagonist": "Mara",
+        "place": "the river district",
+        "hook": "The Offer",
+        "mid": "Rewrites and Shadows",
+        "turn": "The Unsigned Page",
+    },
+    "Misery's Chosen": {
+        "protagonist": "Mico",
+        "place": "the storm-lashed coast",
+        "hook": "Glowing Eyes",
+        "mid": "The Shadowed Figure",
+        "turn": "Chosen or Claimed",
+    },
+    "Goddess Tamer": {
+        "protagonist": "the reborn hero",
+        "place": "the hostile realm",
+        "hook": "A Dangerous Bargain",
+        "mid": "Chains of Divinity",
+        "turn": "Taming the Storm",
+    },
+    "Avengard: The Fall of Senvia": {
+        "protagonist": "the two survivors",
+        "place": "the drowned empire",
+        "hook": "Stolen Voice",
+        "mid": "Across the Black Water",
+        "turn": "The Fall Remembers",
+    },
+    "Diary Of Nobody": {
+        "protagonist": "the diarist",
+        "place": "the quiet rooms of memory",
+        "hook": "Pages No One Should Read",
+        "mid": "Ink That Bleeds",
+        "turn": "The Last Entry",
+    },
+    "Demon King Leveling System": {
+        "protagonist": "the trapped student",
+        "place": "the abyss between levels",
+        "hook": "System Awakens",
+        "mid": "First Boss, First Lie",
+        "turn": "Level Up or Burn Out",
+    },
+    "The Boy with the Checkered Scarf": {
+        "protagonist": "the boy",
+        "place": "three broken timelines",
+        "hook": "The Scarf That Links",
+        "mid": "Threads Across Years",
+        "turn": "One Scarf, One Truth",
+    },
+    "The Mnemonivores": {
+        "protagonist": "the memory-hunter",
+        "place": "the city after sunset",
+        "hook": "Creatures That Feed",
+        "mid": "Stolen Hours",
+        "turn": "Remember or Be Eaten",
+    },
+    "Gaming Cube Adventures": {
+        "protagonist": "the failed streamer",
+        "place": "a game that will not log out",
+        "hook": "Logged In Forever",
+        "mid": "NPCs With Names",
+        "turn": "Quit Is Not an Option",
+    },
+    "The Apex Transfer": {
+        "protagonist": "Elena",
+        "place": "the hidden pack territories",
+        "hook": "Royal Blood",
+        "mid": "The Invisible Outlier",
+        "turn": "Apex Claimed",
+    },
+}
+
+# Backward-compatible alias used by older call sites
 SEED_CHAPTER_BODIES = [
     (
         "Chapter 1: The Beginning",
         "The rain had been falling since dawn, a soft continuous veil that blurred the edges of the city. "
-        "Mara stood at the window of her small apartment and watched people hurry past with their collars turned up. "
-        "She had spent the night finishing the last pages of a manuscript she was not sure anyone would ever read. "
-        "On the desk behind her lay three rejection letters and a half-empty cup of cold coffee. "
-        "When the doorbell rang she almost ignored it. Almost. "
-        "On the other side of the door stood a stranger in a grey coat who knew her pen name and carried an offer "
-        "that would change every careful plan she had made for the next five years. "
-        "She let him in. The rain kept falling. The story, at last, began to move.",
+        "A decision waited on the desk. When the door opened, the story finally moved.",
     ),
     (
         "Chapter 2: Crossroads",
-        "By the end of the first week Mara had learned three things about the agency. "
-        "First, they moved faster than any publisher she had dealt with. Second, they expected her to rewrite "
-        "entire chapters on a deadline measured in hours, not months. Third, the stranger in the grey coat — "
-        "whose name was Elias — never quite answered questions about who funded them. "
-        "She rewrote anyway. The words came easier under pressure than they ever had in the quiet of her room. "
-        "Late one night, while the rest of the building slept, she found a second manuscript in the shared drive: "
-        "a story that used her characters, her settings, and a plot twist she had only ever written in a private notebook. "
-        "Someone had been reading over her shoulder for a long time. "
-        "She closed the laptop and sat in the dark, listening to the city, and decided she would not run.",
+        "Allies and enemies arrived with different maps of the same road. "
+        "The middle of the journey is where most plans break — and where the real plan is born.",
     ),
     (
         "Chapter 3: The Turn",
-        "Confrontation came on a Tuesday. Elias was waiting in the conference room with two folders and a calm expression "
-        "that did not reach his eyes. He pushed the first folder across the table. Inside were printouts of her private notes, "
-        "dated months before she had signed any contract. The second folder held a different kind of offer: silence, money, "
-        "and a new identity if she walked away from the book that was already climbing early charts. "
-        "Mara looked at both folders and then at the rain still streaking the glass. "
-        "She chose a third option neither folder contained. She stood, took her original manuscript from her bag, "
-        "and left it on the table like a challenge. Outside, the air smelled of wet pavement and possibility. "
-        "Whatever came next, she would write it herself.",
+        "Confrontation came quietly. A choice was made that could not be unmade. "
+        "Outside, the weather changed. Inside, everything did.",
     ),
 ]
 
 
 def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
-    """Ensure each book has at least 3 chapters with non-trivial content."""
+    """Ensure each book has at least 3 chapters with non-trivial, book-specific content."""
     inserted = 0
     try:
-        cursor.execute("SELECT id FROM books")
+        cursor.execute("SELECT id, title FROM books")
         books = cursor.fetchall()
         for book in books:
             if isinstance(book, dict):
                 book_id = book["id"]
+                title = book.get("title") or "Untitled"
             else:
                 book_id = book[0]
+                title = book[1] if len(book) > 1 else "Untitled"
+
             if use_sqlite:
                 cursor.execute("SELECT COUNT(*) FROM chapters WHERE story_id=?", (book_id,))
             else:
@@ -287,7 +387,25 @@ def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
                 count = int(row[0])
             if count >= 3:
                 continue
-            for i, (title, body) in enumerate(SEED_CHAPTER_BODIES, start=1):
+
+            flavour = SEED_BOOK_FLAVOUR.get(title) or {
+                "protagonist": "the traveller",
+                "place": "the far edge of the map",
+                "hook": "The Beginning",
+                "mid": "Crossroads",
+                "turn": "The Turn",
+            }
+            for i, (title_tmpl, body_tmpl) in enumerate(SEED_CHAPTER_TEMPLATES, start=1):
+                ch_title = title_tmpl.format(
+                    hook=flavour["hook"],
+                    mid=flavour["mid"],
+                    turn=flavour["turn"],
+                )
+                body = body_tmpl.format(
+                    protagonist=flavour["protagonist"],
+                    place=flavour["place"],
+                    title=title,
+                )
                 if use_sqlite:
                     cursor.execute(
                         "SELECT id FROM chapters WHERE story_id=? AND chapter_number=? LIMIT 1",
@@ -301,7 +419,7 @@ def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
                             INSERT INTO chapters (story_id, chapter_number, title, content, sort_order, submission_status)
                             VALUES (?, ?, ?, ?, ?, ?)
                             """,
-                            (book_id, i, title, body, i, "published"),
+                            (book_id, i, ch_title, body, i, "published"),
                         )
                     except Exception:
                         cursor.execute(
@@ -309,7 +427,7 @@ def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
                             INSERT INTO chapters (story_id, chapter_number, title, content, sort_order)
                             VALUES (?, ?, ?, ?, ?)
                             """,
-                            (book_id, i, title, body, i),
+                            (book_id, i, ch_title, body, i),
                         )
                 else:
                     cursor.execute(
@@ -324,7 +442,7 @@ def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
                             INSERT INTO chapters (story_id, chapter_number, title, content, sort_order, submission_status)
                             VALUES (%s, %s, %s, %s, %s, %s)
                             """,
-                            (book_id, i, title, body, i, "published"),
+                            (book_id, i, ch_title, body, i, "published"),
                         )
                     except Exception:
                         cursor.execute(
@@ -332,12 +450,13 @@ def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
                             INSERT INTO chapters (story_id, chapter_number, title, content, sort_order)
                             VALUES (%s, %s, %s, %s, %s)
                             """,
-                            (book_id, i, title, body, i),
+                            (book_id, i, ch_title, body, i),
                         )
                 inserted += 1
     except Exception:
         pass
     return inserted
+
 
 
 SEED_NOTIFICATIONS = [
