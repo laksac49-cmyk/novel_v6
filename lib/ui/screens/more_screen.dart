@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/theme_controller.dart';
 import '../../data/models/app_bootstrap.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/auth_service.dart';
@@ -29,6 +30,8 @@ class MoreScreen extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
       children: [
         _AccountCard(session: session, onSignOut: onSignOut),
+        const SizedBox(height: 10),
+        const _ThemeModeCard(),
         const SizedBox(height: 10),
         ...data.menuSections.map((section) {
           return _Section(
@@ -254,6 +257,80 @@ class _Section extends StatelessWidget {
       default:
         return Icons.chevron_right;
     }
+  }
+}
+
+
+class _ThemeModeCard extends StatelessWidget {
+  const _ThemeModeCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = ThemeController.instance;
+    return AnimatedBuilder(
+      animation: ctrl,
+      builder: (context, _) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? const Color(0xFF2C2C2C) : AppTheme.border,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Appearance',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white70 : AppTheme.muted,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Light / Dark mode',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : AppTheme.ink,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ThemeMode.light,
+                    label: Text('Light'),
+                    icon: Icon(Icons.light_mode, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: ThemeMode.dark,
+                    label: Text('Dark'),
+                    icon: Icon(Icons.dark_mode, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: ThemeMode.system,
+                    label: Text('System'),
+                    icon: Icon(Icons.settings_suggest, size: 16),
+                  ),
+                ],
+                selected: {ctrl.mode},
+                onSelectionChanged: (set) {
+                  if (set.isNotEmpty) {
+                    ctrl.setMode(set.first);
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

@@ -37,6 +37,7 @@ import {
   updateAdminTag,
   deleteAdminTag,
   listStoryReports,
+  republishStory,
 } from "./api";
 import { AuthorsPage, UsersPage } from "./moderation_pages";
 
@@ -819,6 +820,7 @@ function StoryReportsPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -863,11 +865,12 @@ function StoryReportsPage() {
                   <th>Reports</th>
                   <th>Status</th>
                   <th>Last report</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 && (
-                  <tr><td colSpan={5} style={{color:"var(--text-muted)"}}>No reports yet. Stories appear here after users report them.</td></tr>
+                  <tr><td colSpan={6} style={{color:"var(--text-muted)"}}>No reports yet. Stories appear here after users report them.</td></tr>
                 )}
                 {items.map((r) => (
                   <tr key={r.book_id} style={Number(r.report_count)>=3 ? {background:"#fff5f5"} : undefined}>
@@ -881,6 +884,28 @@ function StoryReportsPage() {
                     </td>
                     <td>{r.status_text || "—"}</td>
                     <td>{r.last_report_at ? String(r.last_report_at).slice(0,19) : "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{fontSize:12, padding:"4px 10px"}}
+                        disabled={busyId === r.book_id}
+                        onClick={async () => {
+                          setBusyId(r.book_id);
+                          setError("");
+                          try {
+                            await republishStory(r.book_id);
+                            await load();
+                          } catch (e) {
+                            setError(e.message || "Re-publish failed");
+                          } finally {
+                            setBusyId(null);
+                          }
+                        }}
+                      >
+                        {busyId === r.book_id ? "…" : "Re-publish"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -19,6 +19,7 @@ class ChapterReaderScreen extends StatefulWidget {
     this.bookId,
     this.tags = const [],
     this.authorUserId,
+    this.authorPhotoUrl,
     this.chapters = const [],
     this.initialChapterIndex = 0,
   });
@@ -33,6 +34,7 @@ class ChapterReaderScreen extends StatefulWidget {
   final int? bookId;
   final List<String> tags;
   final int? authorUserId;
+  final String? authorPhotoUrl;
   final List<Map<String, dynamic>> chapters;
   final int initialChapterIndex;
 
@@ -48,6 +50,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   late String _chapterTitle;
   late String _chapterContent;
   late int _chapterNumber;
+  String? _authorPhotoUrl;
 
   _ReaderTheme _theme = _ReaderTheme.white;
   double _fontSize = 17;
@@ -89,6 +92,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       _chapterTitle = widget.chapterTitle;
       _chapterContent = widget.chapterContent;
       _chapterNumber = widget.chapterNumber;
+      _authorPhotoUrl = widget.authorPhotoUrl;
+      _resolveAuthorPhoto();
     }
     _loadChaptersIfNeeded();
     _loadReactions();
@@ -142,6 +147,21 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
 
   Color get _muted =>
       _theme == _ReaderTheme.nightowl ? Colors.white60 : Colors.black54;
+
+
+  Future<void> _resolveAuthorPhoto() async {
+    if ((_authorPhotoUrl != null && _authorPhotoUrl!.isNotEmpty) ||
+        widget.authorUserId == null) {
+      return;
+    }
+    try {
+      final profile = await widget.apiService.fetchProfile(widget.authorUserId!);
+      final photo = (profile['photo_url'] ?? profile['photoUrl'] ?? '').toString();
+      if (photo.isNotEmpty && mounted) {
+        setState(() => _authorPhotoUrl = photo);
+      }
+    } catch (_) {}
+  }
 
   Future<void> _goNext() async {
     if (_chapterIndex >= _chapters.length - 1) return;
@@ -528,9 +548,43 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                 ),
                 const SizedBox(height: 6),
                 Center(
-                  child: Text(
-                    'By ${widget.author}',
-                    style: TextStyle(color: _muted, fontSize: _fontSize - 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 14,
+                        backgroundColor: Colors.grey.shade300,
+                        backgroundImage: (_authorPhotoUrl != null &&
+                                _authorPhotoUrl!.isNotEmpty)
+                            ? NetworkImage(
+                                widget.apiService.resolveAssetUrl(
+                                  _authorPhotoUrl!,
+                                ),
+                              )
+                            : null,
+                        child: (_authorPhotoUrl == null ||
+                                _authorPhotoUrl!.isEmpty)
+                            ? Text(
+                                widget.author.isNotEmpty
+                                    ? widget.author[0].toUpperCase()
+                                    : 'A',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black54,
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'By ${widget.author}',
+                        style: TextStyle(
+                          color: _muted,
+                          fontSize: _fontSize - 2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 12),

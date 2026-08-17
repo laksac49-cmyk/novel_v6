@@ -303,3 +303,7 @@ export function listStoryReports() {
   return request("/api/admin/reports");
 }
 
+
+export function republishStory(bookId) {
+  return request(`/api/admin/books/${bookId}/republish`, { method: "POST", body: "{}" });
+}
