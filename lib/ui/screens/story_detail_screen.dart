@@ -39,6 +39,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   bool _likeBusy = false;
   List<Map<String, dynamic>> _authorStories = const [];
   List<Map<String, dynamic>> _youMayAlsoLike = const [];
+  String? _authorPhotoUrl;
 
   @override
   void initState() {
@@ -62,6 +63,15 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           _likesCount = (detail['likes_count'] as num?)?.toInt() ??
               (detail['likes'] as num?)?.toInt() ??
               0;
+          final photo = (detail['author_photo_url'] ??
+                  detail['author_photo'] ??
+                  detail['photo_url'] ??
+                  detail['authorPhotoUrl'] ??
+                  '')
+              .toString();
+          if (photo.isNotEmpty) {
+            _authorPhotoUrl = photo;
+          }
         });
       }
       final chapters = await widget.apiService.fetchStoryChapters(_book.id);
@@ -83,6 +93,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           );
           if (mounted) setState(() => _authorStories = others);
         } catch (_) {}
+        // Resolve author profile photo for reader header + detail avatar
+        if (_authorPhotoUrl == null || _authorPhotoUrl!.isEmpty) {
+          try {
+            final profile = await widget.apiService.fetchProfile(aid);
+            final photo = (profile['photo_url'] ??
+                    profile['photoUrl'] ??
+                    profile['avatar_url'] ??
+                    '')
+                .toString();
+            if (photo.isNotEmpty && mounted) {
+              setState(() => _authorPhotoUrl = photo);
+            }
+          } catch (_) {}
+        }
       }
       final reviews = await widget.apiService.fetchBookReviews(_book.id);
       if (mounted) {
@@ -301,6 +325,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           bookId: _book.id,
           tags: _tags,
           authorUserId: _book.authorUserId,
+          authorPhotoUrl: _authorPhotoUrl,
           chapters: _chapters,
           initialChapterIndex: idx < 0 ? 0 : idx,
         ),
@@ -843,15 +868,26 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                       CircleAvatar(
                         radius: 22,
                         backgroundColor: Colors.grey.shade300,
-                        child: Text(
-                          _book.author.isNotEmpty
-                              ? _book.author[0].toUpperCase()
-                              : 'A',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black87,
-                          ),
-                        ),
+                        backgroundImage: (_authorPhotoUrl != null &&
+                                _authorPhotoUrl!.isNotEmpty)
+                            ? NetworkImage(
+                                widget.apiService.resolveAssetUrl(
+                                  _authorPhotoUrl!,
+                                ),
+                              )
+                            : null,
+                        child: (_authorPhotoUrl == null ||
+                                _authorPhotoUrl!.isEmpty)
+                            ? Text(
+                                _book.author.isNotEmpty
+                                    ? _book.author[0].toUpperCase()
+                                    : 'A',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
