@@ -615,7 +615,7 @@ def _user_access_block_reason(user_id: int) -> str | None:
         (user_id,),
     )
     if not rows:
-        return "Account not found"
+        return "Account not found (user id missing in app_users — confirm MYSQL_DATABASE=novel_app_db_v2)"
     row = rows[0]
     if int(_row_get(row, "is_deleted") or 0) == 1:
         return "This account has been deleted by an administrator"
@@ -1042,9 +1042,11 @@ def health():
             if isinstance(r, dict):
                 return int(r.get("c") or list(r.values())[0] or 0)
             return int(r[0])
+        import os as _os
         return {
             "ok": True,
             "db_mode": "sqlite" if _live_use_sqlite() else "mysql",
+            "mysql_database": _os.getenv("MYSQL_DATABASE", "novel_app_db_v2"),
             "sqlite_file": str(getattr(db_mod, "SQLITE_FILE", "")),
             "books": _c(books),
             "categories": _c(cats),
@@ -1075,14 +1077,23 @@ def admin_login(payload: AdminLoginRequest):
 @app.post("/api/auth/google")
 def authenticate_google(payload: GoogleAuthRequest):
     google_user = _verify_google_payload(payload)
-    rows = fetch_all("SELECT id FROM app_users WHERE email=%s LIMIT 1", (google_user["email"],))
+    email = (google_user.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Google account has no email")
 
-    if rows:
-        user_id = rows[0]["id"]
+    # Normalize stored email to lowercase for stable lookups
+    rows = fetch_all(
+        "SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1",
+        (email,),
+    )
+    user_id = _row_id(rows[0]) if rows else None
+
+    if user_id is not None:
         execute_write(
             """
             UPDATE app_users
-            SET provider=%s, provider_subject=%s, display_name=%s, photo_url=%s, last_login_at=CURRENT_TIMESTAMP
+            SET provider=%s, provider_subject=%s, display_name=%s, photo_url=%s,
+                email=%s, last_login_at=CURRENT_TIMESTAMP
             WHERE id=%s
             """,
             (
@@ -1090,6 +1101,7 @@ def authenticate_google(payload: GoogleAuthRequest):
                 google_user["subject"],
                 google_user["display_name"],
                 google_user["photo_url"],
+                email,
                 user_id,
             ),
         )
@@ -1100,13 +1112,26 @@ def authenticate_google(payload: GoogleAuthRequest):
             VALUES (%s, %s, %s, %s, %s)
             """,
             (
-                google_user["email"],
+                email,
                 "google",
                 google_user["subject"],
                 google_user["display_name"],
                 google_user["photo_url"],
             ),
         )
+        # MySQL pure connector sometimes returns 0 lastrowid — resolve by email
+        if not user_id:
+            user_id = _find_user_id_by_email(email)
+        if not user_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Google sign-in succeeded but user row could not be created. Check MYSQL_DATABASE=novel_app_db_v2.",
+            )
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=500, detail="Invalid user id after Google sign-in")
 
     _assert_user_can_login(user_id)
     return {
@@ -1121,21 +1146,21 @@ def authenticate_google(payload: GoogleAuthRequest):
 
 @app.post("/api/auth/email")
 def authenticate_email(payload: EmailAuthRequest):
-    email = payload.email.strip()
+    email = payload.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email")
 
     display_name = (payload.display_name or "").strip() or email.split("@")[0]
-    rows = fetch_all("SELECT id FROM app_users WHERE email=%s LIMIT 1", (email,))
-    if rows:
-        user_id = rows[0]["id"]
+    rows = fetch_all("SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1", (email,))
+    user_id = _row_id(rows[0]) if rows else None
+    if user_id is not None:
         execute_write(
             """
             UPDATE app_users
-            SET provider='email', display_name=%s, last_login_at=CURRENT_TIMESTAMP
+            SET provider='email', display_name=%s, email=%s, last_login_at=CURRENT_TIMESTAMP
             WHERE id=%s
             """,
-            (display_name, user_id),
+            (display_name, email, user_id),
         )
     else:
         user_id, _ = execute_write(
@@ -1145,7 +1170,14 @@ def authenticate_email(payload: EmailAuthRequest):
             """,
             (email, display_name),
         )
-
+        if not user_id:
+            user_id = _find_user_id_by_email(email)
+        if not user_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not create user. Check MYSQL_DATABASE=novel_app_db_v2 and app_users table.",
+            )
+    user_id = int(user_id)
     _assert_user_can_login(user_id)
     return {
         "id": user_id,

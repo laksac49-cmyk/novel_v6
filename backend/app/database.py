@@ -432,7 +432,7 @@ def _ensure_database_exists() -> None:
         return
 
     ssl_disabled = os.getenv("MYSQL_SSL_DISABLED", "false").lower() == "true"
-    db_name = os.getenv("MYSQL_DATABASE", "novel_app_db")
+    db_name = os.getenv("MYSQL_DATABASE", "novel_app_db_v2")
     if mysql_connector is None:
         raise RuntimeError("mysql.connector is not installed; install mysql-connector-python to use MySQL mode")
 
@@ -1689,7 +1689,7 @@ def get_connection():
         port=int(os.getenv("MYSQL_PORT", "3306")),
         user=os.getenv("MYSQL_USER", "root"),
         password=os.getenv("MYSQL_PASSWORD", ""),
-        database=os.getenv("MYSQL_DATABASE", "novel_app_db"),
+        database=os.getenv("MYSQL_DATABASE", "novel_app_db_v2"),
         ssl_disabled=ssl_disabled,
         # Use the pure-Python implementation. The bundled C extension
         # (_mysql_connector.cp313-win_amd64.pyd) crashes with an access
