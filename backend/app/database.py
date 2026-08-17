@@ -225,6 +225,121 @@ SEED_BOOKS = [
     ),
 ]
 
+
+# Longer sample chapters (3 per seeded novel) — inserted only when a book has fewer than 3 chapters
+SEED_CHAPTER_BODIES = [
+    (
+        "Chapter 1: The Beginning",
+        "The rain had been falling since dawn, a soft continuous veil that blurred the edges of the city. "
+        "Mara stood at the window of her small apartment and watched people hurry past with their collars turned up. "
+        "She had spent the night finishing the last pages of a manuscript she was not sure anyone would ever read. "
+        "On the desk behind her lay three rejection letters and a half-empty cup of cold coffee. "
+        "When the doorbell rang she almost ignored it. Almost. "
+        "On the other side of the door stood a stranger in a grey coat who knew her pen name and carried an offer "
+        "that would change every careful plan she had made for the next five years. "
+        "She let him in. The rain kept falling. The story, at last, began to move.",
+    ),
+    (
+        "Chapter 2: Crossroads",
+        "By the end of the first week Mara had learned three things about the agency. "
+        "First, they moved faster than any publisher she had dealt with. Second, they expected her to rewrite "
+        "entire chapters on a deadline measured in hours, not months. Third, the stranger in the grey coat — "
+        "whose name was Elias — never quite answered questions about who funded them. "
+        "She rewrote anyway. The words came easier under pressure than they ever had in the quiet of her room. "
+        "Late one night, while the rest of the building slept, she found a second manuscript in the shared drive: "
+        "a story that used her characters, her settings, and a plot twist she had only ever written in a private notebook. "
+        "Someone had been reading over her shoulder for a long time. "
+        "She closed the laptop and sat in the dark, listening to the city, and decided she would not run.",
+    ),
+    (
+        "Chapter 3: The Turn",
+        "Confrontation came on a Tuesday. Elias was waiting in the conference room with two folders and a calm expression "
+        "that did not reach his eyes. He pushed the first folder across the table. Inside were printouts of her private notes, "
+        "dated months before she had signed any contract. The second folder held a different kind of offer: silence, money, "
+        "and a new identity if she walked away from the book that was already climbing early charts. "
+        "Mara looked at both folders and then at the rain still streaking the glass. "
+        "She chose a third option neither folder contained. She stood, took her original manuscript from her bag, "
+        "and left it on the table like a challenge. Outside, the air smelled of wet pavement and possibility. "
+        "Whatever came next, she would write it herself.",
+    ),
+]
+
+
+def _seed_long_chapters_for_books(cursor, use_sqlite: bool) -> int:
+    """Ensure each book has at least 3 chapters with non-trivial content."""
+    inserted = 0
+    try:
+        cursor.execute("SELECT id FROM books")
+        books = cursor.fetchall()
+        for book in books:
+            if isinstance(book, dict):
+                book_id = book["id"]
+            else:
+                book_id = book[0]
+            if use_sqlite:
+                cursor.execute("SELECT COUNT(*) FROM chapters WHERE story_id=?", (book_id,))
+            else:
+                cursor.execute("SELECT COUNT(*) FROM chapters WHERE story_id=%s", (book_id,))
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                count = int(list(row.values())[0])
+            else:
+                count = int(row[0])
+            if count >= 3:
+                continue
+            for i, (title, body) in enumerate(SEED_CHAPTER_BODIES, start=1):
+                if use_sqlite:
+                    cursor.execute(
+                        "SELECT id FROM chapters WHERE story_id=? AND chapter_number=? LIMIT 1",
+                        (book_id, i),
+                    )
+                    if cursor.fetchone() is not None:
+                        continue
+                    try:
+                        cursor.execute(
+                            """
+                            INSERT INTO chapters (story_id, chapter_number, title, content, sort_order, submission_status)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (book_id, i, title, body, i, "published"),
+                        )
+                    except Exception:
+                        cursor.execute(
+                            """
+                            INSERT INTO chapters (story_id, chapter_number, title, content, sort_order)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (book_id, i, title, body, i),
+                        )
+                else:
+                    cursor.execute(
+                        "SELECT id FROM chapters WHERE story_id=%s AND chapter_number=%s LIMIT 1",
+                        (book_id, i),
+                    )
+                    if cursor.fetchone() is not None:
+                        continue
+                    try:
+                        cursor.execute(
+                            """
+                            INSERT INTO chapters (story_id, chapter_number, title, content, sort_order, submission_status)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (book_id, i, title, body, i, "published"),
+                        )
+                    except Exception:
+                        cursor.execute(
+                            """
+                            INSERT INTO chapters (story_id, chapter_number, title, content, sort_order)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (book_id, i, title, body, i),
+                        )
+                inserted += 1
+    except Exception:
+        pass
+    return inserted
+
+
 SEED_NOTIFICATIONS = [
     ("Story", "New chapter available", "A story you follow just published a new chapter. Open Discover to read it.", "Just now", 1),
     ("Story", "Story recommendation", "Based on your library, try these trending stories this week.", "1h ago", 2),
@@ -1069,6 +1184,12 @@ def _run_startup_migrations_sqlite(connection) -> dict[str, int]:
             target_path.write_bytes(image_path.read_bytes())
             result["assets_seeded"] += 1
 
+
+    try:
+        result["chapters_seeded"] = _seed_long_chapters_for_books(cursor, use_sqlite=True)
+    except Exception:
+        result["chapters_seeded"] = 0
+
     connection.commit()
     cursor.close()
     return result
@@ -1533,6 +1654,12 @@ def run_startup_migrations() -> dict[str, int]:
 
             target_path.write_bytes(image_path.read_bytes())
             result["assets_seeded"] += 1
+
+
+    try:
+        result["chapters_seeded"] = _seed_long_chapters_for_books(cursor, use_sqlite=False)
+    except Exception:
+        result["chapters_seeded"] = 0
 
     connection.commit()
     cursor.close()

@@ -88,7 +88,7 @@ class StoryCreateRequest(BaseModel):
     cover_path: str = ""
     tags: list[str] = []
     content_warnings: str = ""
-    status_text: str = "Draft"  # pass "Published" to auto-publish on create
+    status_text: str = "Published"  # auto-publish by default; pass "Draft" to keep private
 
 
 class StoryUpdateRequest(BaseModel):
@@ -2080,7 +2080,7 @@ def create_story_chapter(story_id: int, payload: ChapterCreateRequest):
             )
             chapter_number = int(next_rows[0]["next_chapter"]) if next_rows else 1
 
-        submission_status = (payload.submission_status or "draft").strip() or "draft"
+        submission_status = (payload.submission_status or "published").strip() or "published"
         scheduled_for = _parse_optional_datetime(payload.scheduled_for)
         scheduled_value = (
             scheduled_for.isoformat() if isinstance(scheduled_for, datetime) else scheduled_for
@@ -2295,10 +2295,14 @@ def create_writer_story(
 ):
     cover = _normalize_cover_path(payload.cover_path)
     warnings = (payload.content_warnings or "").strip()
-    status = (payload.status_text or "Draft").strip() or "Draft"
-    # Client requirement: publishing a story makes it live immediately
-    if status.lower() in ("publish", "published", "live", "public"):
+    # Auto-publish by default (requirement): newly created stories go live unless explicitly Draft/Private
+    status = (payload.status_text or "Published").strip() or "Published"
+    if status.lower() in ("publish", "published", "live", "public", ""):
         status = "Published"
+    elif status.lower() in ("draft", "private", "unpublished"):
+        status = status[:1].upper() + status[1:].lower() if status.lower() == "draft" else status
+        if status.lower() == "draft":
+            status = "Draft"
     story_id, _ = execute_write(
         """
         INSERT INTO books (
@@ -2595,45 +2599,65 @@ def _resolve_chapter_id(book_id: int, chapter_number: int) -> int | None:
 
 
 def _serialize_comment_row(row: dict[str, Any]) -> dict[str, Any]:
-    name = (
-        row.get("display_name")
-        or row.get("username")
-        or "Reader"
-    )
-    avatar = row.get("photo_url") or row.get("avatar_url") or ""
-    created = row.get("created_at")
-    return {
-        "id": row["id"],
-        "chapter_id": row.get("chapter_id"),
-        "book_id": row.get("book_id"),
-        "user_id": row.get("user_id"),
-        "body": row.get("body") or "",
-        "display_name": name,
-        "username": row.get("username") or "",
-        "photo_url": avatar,
-        "created_at": str(created) if created is not None else "",
-    }
+    """Null-safe serializer for chapter comments (app_users has no username column)."""
+    try:
+        name = (
+            (row.get("display_name") if isinstance(row, dict) else None)
+            or (row.get("username") if isinstance(row, dict) else None)
+            or "Reader"
+        )
+        avatar = ""
+        if isinstance(row, dict):
+            avatar = row.get("photo_url") or row.get("avatar_url") or ""
+        created = row.get("created_at") if isinstance(row, dict) else None
+        return {
+            "id": row.get("id") if isinstance(row, dict) else None,
+            "chapter_id": row.get("chapter_id") if isinstance(row, dict) else None,
+            "book_id": row.get("book_id") if isinstance(row, dict) else None,
+            "user_id": row.get("user_id") if isinstance(row, dict) else None,
+            "body": (row.get("body") or "") if isinstance(row, dict) else "",
+            "display_name": name,
+            "username": "",
+            "photo_url": avatar,
+            "created_at": str(created) if created is not None else "",
+        }
+    except Exception:
+        return {
+            "id": None,
+            "chapter_id": None,
+            "book_id": None,
+            "user_id": None,
+            "body": "",
+            "display_name": "Reader",
+            "username": "",
+            "photo_url": "",
+            "created_at": "",
+        }
 
 
 @app.get("/api/books/{book_id}/chapters/{chapter_number}/comments")
 def list_chapter_comments(book_id: int, chapter_number: int):
     """Public list of comments for a chapter (by book + chapter number)."""
-    _ensure_chapter_comments_table()
-    chapter_id = _resolve_chapter_id(book_id, chapter_number)
-    if chapter_id is None:
-        return {"items": []}
-    rows = fetch_all(
-        """
-        SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
-               u.display_name, u.username, u.photo_url
-        FROM chapter_comments c
-        LEFT JOIN app_users u ON u.id = c.user_id
-        WHERE c.chapter_id = %s
-        ORDER BY c.created_at DESC, c.id DESC
-        """,
-        (chapter_id,),
-    )
-    return {"items": [_serialize_comment_row(r) for r in rows]}
+    try:
+        _ensure_chapter_comments_table()
+        chapter_id = _resolve_chapter_id(book_id, chapter_number)
+        if chapter_id is None:
+            return {"items": []}
+        rows = fetch_all(
+            """
+            SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
+                   u.display_name, u.photo_url
+            FROM chapter_comments c
+            LEFT JOIN app_users u ON u.id = c.user_id
+            WHERE c.chapter_id = %s
+            ORDER BY c.created_at DESC, c.id DESC
+            """,
+            (chapter_id,),
+        )
+        return {"items": [_serialize_comment_row(r) for r in (rows or [])]}
+    except Exception as exc:
+        LOGGER.exception("list_chapter_comments failed: %s", exc)
+        return {"items": [], "error": "Failed to load comments"}
 
 
 @app.post("/api/books/{book_id}/chapters/{chapter_number}/comments")
@@ -2664,45 +2688,53 @@ def create_chapter_comment(
         chapter_id = _resolve_chapter_id(book_id, chapter_number)
         if chapter_id is None:
             raise HTTPException(status_code=404, detail="Chapter not found")
-    execute_write(
-        """
-        INSERT INTO chapter_comments (chapter_id, book_id, user_id, body)
-        VALUES (%s, %s, %s, %s)
-        """,
-        (chapter_id, book_id, user["user_id"], body),
-    )
-    bump_content_version()
-    rows = fetch_all(
-        """
-        SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
-               u.display_name, u.username, u.photo_url
-        FROM chapter_comments c
-        LEFT JOIN app_users u ON u.id = c.user_id
-        WHERE c.chapter_id = %s AND c.user_id = %s
-        ORDER BY c.id DESC
-        LIMIT 1
-        """,
-        (chapter_id, user["user_id"]),
-    )
-    item = _serialize_comment_row(rows[0]) if rows else {"ok": True, "body": body}
-    return {"ok": True, "item": item}
+    try:
+        execute_write(
+            """
+            INSERT INTO chapter_comments (chapter_id, book_id, user_id, body)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (chapter_id, book_id, user["user_id"], body),
+        )
+        bump_content_version()
+        rows = fetch_all(
+            """
+            SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
+                   u.display_name, u.photo_url
+            FROM chapter_comments c
+            LEFT JOIN app_users u ON u.id = c.user_id
+            WHERE c.chapter_id = %s AND c.user_id = %s
+            ORDER BY c.id DESC
+            LIMIT 1
+            """,
+            (chapter_id, user["user_id"]),
+        )
+        item = _serialize_comment_row(rows[0]) if rows else {"ok": True, "body": body, "display_name": "You"}
+        return {"ok": True, "item": item}
+    except Exception as exc:
+        LOGGER.exception("create_chapter_comment failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to post comment: {exc}")
 
 
 @app.get("/api/chapters/{chapter_id}/comments")
 def list_comments_by_chapter_id(chapter_id: int):
-    _ensure_chapter_comments_table()
-    rows = fetch_all(
-        """
-        SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
-               u.display_name, u.username, u.photo_url
-        FROM chapter_comments c
-        LEFT JOIN app_users u ON u.id = c.user_id
-        WHERE c.chapter_id = %s
-        ORDER BY c.created_at DESC, c.id DESC
-        """,
-        (chapter_id,),
-    )
-    return {"items": [_serialize_comment_row(r) for r in rows]}
+    try:
+        _ensure_chapter_comments_table()
+        rows = fetch_all(
+            """
+            SELECT c.id, c.chapter_id, c.book_id, c.user_id, c.body, c.created_at,
+                   u.display_name, u.photo_url
+            FROM chapter_comments c
+            LEFT JOIN app_users u ON u.id = c.user_id
+            WHERE c.chapter_id = %s
+            ORDER BY c.created_at DESC, c.id DESC
+            """,
+            (chapter_id,),
+        )
+        return {"items": [_serialize_comment_row(r) for r in (rows or [])]}
+    except Exception as exc:
+        LOGGER.exception("list_comments_by_chapter_id failed: %s", exc)
+        return {"items": []}
 
 
 def _ensure_author_follows_table() -> None:

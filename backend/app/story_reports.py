@@ -121,6 +121,23 @@ def register_story_report_routes(
         )
         count = int(count_rows[0]["c"]) if count_rows else 0
         flagged = count >= 3
+        unpublished = False
+        # Auto-unpublish / hide after 3 unique reports
+        if flagged:
+            try:
+                execute_write(
+                    """
+                    UPDATE books
+                    SET status_text = 'Unpublished'
+                    WHERE id = %s
+                      AND LOWER(COALESCE(status_text, '')) NOT IN ('unpublished', 'private', 'draft')
+                    """,
+                    (book_id,),
+                )
+                unpublished = True
+                LOGGER.info("Book %s auto-unpublished after %s reports", book_id, count)
+            except Exception as up_exc:
+                LOGGER.warning("auto-unpublish failed for book %s: %s", book_id, up_exc)
         try:
             bump_content_version()
         except Exception:
@@ -129,6 +146,7 @@ def register_story_report_routes(
             "ok": True,
             "report_count": count,
             "flagged_for_admin": flagged,
+            "auto_unpublished": unpublished,
             "already_reported": bool(existing),
         }
 
@@ -167,3 +185,20 @@ def register_story_report_routes(
                 }
             )
         return {"items": items}
+
+
+    @app.post("/api/admin/books/{book_id}/republish")
+    def admin_republish_story(book_id: int, _: dict[str, Any] = Depends(require_admin)):
+        """Admin override: re-activate a story after report review."""
+        books = fetch_all("SELECT id, status_text FROM books WHERE id=%s LIMIT 1", (book_id,))
+        if not books:
+            raise HTTPException(status_code=404, detail="Book not found")
+        execute_write(
+            "UPDATE books SET status_text=%s, section_name=%s WHERE id=%s",
+            ("Published", "recently_updated", book_id),
+        )
+        try:
+            bump_content_version()
+        except Exception:
+            pass
+        return {"ok": True, "book_id": book_id, "status_text": "Published"}
