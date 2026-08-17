@@ -343,6 +343,15 @@ def run_startup_tasks() -> dict[str, Any]:
     result["migrations"] = migration_report
 
     try:
+        from .database import force_seed_if_empty
+        seed_report = force_seed_if_empty()
+        result["force_seed"] = seed_report
+        LOGGER.info("force_seed_if_empty: %s", seed_report)
+    except Exception as seed_exc:
+        LOGGER.warning("force_seed_if_empty failed: %s", seed_exc)
+        result["force_seed_error"] = str(seed_exc)
+
+    try:
         conn = get_connection()
         result["tables_ensured"] = _ensure_mysql_extra_tables(conn)
         result["tags_seeded"] = _seed_tags(conn)

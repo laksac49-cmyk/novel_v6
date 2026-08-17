@@ -1696,3 +1696,101 @@ def get_connection():
         # violation (0xC0000005) on this machine.
         use_pure=True,
     )
+
+
+def force_seed_if_empty() -> dict[str, int]:
+    """Guarantee baseline categories/books/chapters exist (idempotent)."""
+    result = {"books_added": 0, "categories_added": 0, "chapters_seeded": 0}
+    connection = get_connection()
+    cursor = connection.cursor()
+    try:
+        use_sqlite = USE_SQLITE
+        # categories
+        for name, topic_count, tab_group, sort_order in SEED_CATEGORIES:
+            if use_sqlite:
+                cursor.execute(
+                    "SELECT id FROM categories WHERE name=? AND tab_group=? LIMIT 1",
+                    (name, tab_group),
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "INSERT INTO categories (name, topic_count, tab_group, sort_order) VALUES (?, ?, ?, ?)",
+                        (name, topic_count, tab_group, sort_order),
+                    )
+                    result["categories_added"] += 1
+            else:
+                cursor.execute(
+                    "SELECT id FROM categories WHERE name=%s AND tab_group=%s LIMIT 1",
+                    (name, tab_group),
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "INSERT INTO categories (name, topic_count, tab_group, sort_order) VALUES (%s, %s, %s, %s)",
+                        (name, topic_count, tab_group, sort_order),
+                    )
+                    result["categories_added"] += 1
+
+        for (
+            title,
+            author,
+            description,
+            cover_path,
+            accent_hex,
+            section_name,
+            status_text,
+            rating,
+            primary_genre,
+            secondary_genre,
+            cta_label,
+            sort_order,
+            is_completed,
+        ) in SEED_BOOKS:
+            if use_sqlite:
+                cursor.execute("SELECT id FROM books WHERE title=? LIMIT 1", (title,))
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        """
+                        INSERT INTO books (
+                            title, author, description, cover_path, accent_hex, section_name, status_text,
+                            rating, genre, primary_genre, secondary_genre, cta_label, sort_order, is_completed
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            title, author, description, cover_path, accent_hex, section_name, status_text,
+                            rating, primary_genre, primary_genre, secondary_genre, cta_label, sort_order, is_completed,
+                        ),
+                    )
+                    result["books_added"] += 1
+            else:
+                cursor.execute("SELECT id FROM books WHERE title=%s LIMIT 1", (title,))
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        """
+                        INSERT INTO books (
+                            title, author, description, cover_path, accent_hex, section_name, status_text,
+                            rating, genre, primary_genre, secondary_genre, cta_label, sort_order, is_completed
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            title, author, description, cover_path, accent_hex, section_name, status_text,
+                            rating, primary_genre, primary_genre, secondary_genre, cta_label, sort_order, is_completed,
+                        ),
+                    )
+                    result["books_added"] += 1
+
+        try:
+            result["chapters_seeded"] = _seed_long_chapters_for_books(cursor, use_sqlite=use_sqlite)
+        except Exception:
+            result["chapters_seeded"] = 0
+
+        connection.commit()
+    except Exception:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+    return result

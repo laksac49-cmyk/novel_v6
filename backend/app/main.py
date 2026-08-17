@@ -313,9 +313,18 @@ class VersionResponse(BaseModel):
     updated_at: str | None = None
 
 
+def _live_use_sqlite() -> bool:
+    """Always read current dialect from database module (survives MySQL→SQLite fallback)."""
+    try:
+        from . import database as _db
+        return bool(getattr(_db, "USE_SQLITE", USE_SQLITE))
+    except Exception:
+        return bool(USE_SQLITE)
+
+
 def _to_db_query(query: str) -> str:
     """Adapt SQL for the active DB dialect (SQLite vs MySQL)."""
-    if USE_SQLITE:
+    if _live_use_sqlite():
         return query.replace("%s", "?")
     # MySQL uses INSERT IGNORE, not SQLite's INSERT OR IGNORE
     q = query.replace("INSERT OR IGNORE", "INSERT IGNORE")
@@ -325,11 +334,28 @@ def _to_db_query(query: str) -> str:
 
 def fetch_all(query: str, params: tuple[Any, ...] | None = None):
     connection = get_connection()
-    cursor = connection.cursor(dictionary=True) if not USE_SQLITE else connection.cursor()
-    cursor.execute(_to_db_query(query), params or ())
-    rows = cursor.fetchall()
-    cursor.close()
-    connection.close()
+    use_sqlite = _live_use_sqlite()
+    if use_sqlite:
+        cursor = connection.cursor()
+    else:
+        cursor = connection.cursor(dictionary=True)
+    try:
+        cursor.execute(_to_db_query(query), params or ())
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+    if use_sqlite:
+        # sqlite3.Row → plain dict for consistent .get() usage
+        out = []
+        for row in rows or []:
+            if hasattr(row, "keys"):
+                out.append({k: row[k] for k in row.keys()})
+            elif isinstance(row, dict):
+                out.append(row)
+            else:
+                out.append(row)
+        return out
     return rows
 
 
@@ -344,8 +370,7 @@ def execute_write(query: str, params: tuple[Any, ...]):
         # MySQL/SQLite: if lastrowid is 0/None after INSERT, try dialect helpers
         if not last_id and query.strip().upper().startswith("INSERT"):
             try:
-                from .database import USE_SQLITE
-                if USE_SQLITE:
+                if _live_use_sqlite():
                     cursor.execute("SELECT last_insert_rowid()")
                 else:
                     cursor.execute("SELECT LAST_INSERT_ID()")
@@ -959,14 +984,74 @@ def startup_initialize_database():
     try:
         # Delegate startup tasks (schema init, migrations, seeding, basic checks)
         from .startup_tasks import run_startup_tasks
+        from . import database as db_mod
 
         summary = run_startup_tasks()
         LOGGER.info("Startup tasks summary: %s", summary)
+
+        # Verify seed data is visible after dialect fallback
+        try:
+            books = fetch_all("SELECT COUNT(*) AS c FROM books")
+            cats = fetch_all("SELECT COUNT(*) AS c FROM categories")
+            chs = fetch_all("SELECT COUNT(*) AS c FROM chapters")
+            def _c(rows):
+                if not rows:
+                    return 0
+                r = rows[0]
+                if isinstance(r, dict):
+                    return int(r.get("c") or list(r.values())[0] or 0)
+                return int(r[0])
+            LOGGER.info(
+                "DB ready mode=%s books=%s categories=%s chapters=%s",
+                "sqlite" if _live_use_sqlite() else "mysql",
+                _c(books),
+                _c(cats),
+                _c(chs),
+            )
+            # If still empty, force one more migration/seed pass
+            if _c(books) == 0 or _c(cats) == 0:
+                LOGGER.warning("Seed data missing after startup — re-running migrations")
+                try:
+                    db_mod.run_startup_migrations()
+                except Exception as re_exc:
+                    LOGGER.exception("Re-seed failed: %s", re_exc)
+                books2 = fetch_all("SELECT COUNT(*) AS c FROM books")
+                LOGGER.info("After re-seed books=%s", _c(books2))
+        except Exception as count_exc:
+            LOGGER.exception("Post-startup count check failed: %s", count_exc)
+
         _content_version_row()
     except DB_INIT_EXCEPTIONS as exc:
         LOGGER.exception("Automatic database initialization failed: %s", exc)
     except Exception as exc:
         LOGGER.exception("Unexpected error running startup tasks: %s", exc)
+
+
+@app.get("/api/health")
+def health():
+    """Local/debug: confirm DB mode and row counts after auto-migrate/seed."""
+    try:
+        from . import database as db_mod
+        books = fetch_all("SELECT COUNT(*) AS c FROM books")
+        cats = fetch_all("SELECT COUNT(*) AS c FROM categories")
+        chs = fetch_all("SELECT COUNT(*) AS c FROM chapters")
+        def _c(rows):
+            if not rows:
+                return 0
+            r = rows[0]
+            if isinstance(r, dict):
+                return int(r.get("c") or list(r.values())[0] or 0)
+            return int(r[0])
+        return {
+            "ok": True,
+            "db_mode": "sqlite" if _live_use_sqlite() else "mysql",
+            "sqlite_file": str(getattr(db_mod, "SQLITE_FILE", "")),
+            "books": _c(books),
+            "categories": _c(cats),
+            "chapters": _c(chs),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/api/content/version", response_model=VersionResponse)
