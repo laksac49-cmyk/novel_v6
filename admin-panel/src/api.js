@@ -244,6 +244,11 @@ export function listAdminUsers() {
   return request("/api/admin/users");
 }
 
+export function fetchUserActivity(userId) {
+  return request(`/api/users/${userId}/activity`);
+}
+
+
 export function banUser(id) {
   return request(`/api/admin/users/${id}/ban`, { method: "POST", body: "{}" });
 }

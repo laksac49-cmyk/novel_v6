@@ -10,6 +10,7 @@ import {
   deleteAdminUser,
   restoreUser,
   setAuthorActive,
+  fetchUserActivity,
 } from "./api";
 
 function asArray(v) {
@@ -105,6 +106,33 @@ const ACTION_LABELS = {
 
 /* ───────── Attractive account view modal ───────── */
 export function AccountViewModal({ user, roleLabel, onClose, onAction, busy }) {
+  const [activity, setActivity] = useState([]);
+  const [actLoading, setActLoading] = useState(false);
+  const [actError, setActError] = useState("");
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      setActLoading(true);
+      setActError("");
+      try {
+        const data = await fetchUserActivity(user.id);
+        if (!cancelled) setActivity(asArray(data?.items ?? data));
+      } catch (e) {
+        if (!cancelled) {
+          setActError(String(e.message || e));
+          setActivity([]);
+        }
+      } finally {
+        if (!cancelled) setActLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   if (!user) return null;
   const status = userStatus(user);
   const initial = (user.display_name || user.email || "?").charAt(0).toUpperCase();
@@ -115,7 +143,7 @@ export function AccountViewModal({ user, roleLabel, onClose, onAction, busy }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal account-view-modal pro-view" onClick={(e) => e.stopPropagation()}>
+      <div className="modal account-view-modal pro-view" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: "90vh", overflow: "auto" }}>
         <div className="pro-view-hero">
           <div className="pro-view-hero-bg" />
           <button type="button" className="pro-view-close" onClick={onClose} aria-label="Close">
@@ -154,69 +182,57 @@ export function AccountViewModal({ user, roleLabel, onClose, onAction, busy }) {
           </div>
         </div>
 
-        <div className="pro-view-body">
-          <div className="pro-field">
-            <span className="pro-field-label">Bio</span>
-            <p className="pro-field-value">{user.bio || "No bio provided."}</p>
-          </div>
+        <div className="pro-view-fields" style={{ padding: "12px 16px" }}>
+          <h3 style={{ margin: "8px 0" }}>Account details (live from DB)</h3>
+          <div className="pro-field"><span className="pro-field-label">User ID</span><p className="pro-field-value">{user.id}</p></div>
+          <div className="pro-field"><span className="pro-field-label">Email</span><p className="pro-field-value">{user.email || "—"}</p></div>
+          <div className="pro-field"><span className="pro-field-label">Display name</span><p className="pro-field-value">{user.display_name || "—"}</p></div>
+          <div className="pro-field"><span className="pro-field-label">Provider</span><p className="pro-field-value">{user.provider || "—"}</p></div>
+          <div className="pro-field"><span className="pro-field-label">Bio</span><p className="pro-field-value">{user.bio || "—"}</p></div>
+          <div className="pro-field"><span className="pro-field-label">is_banned</span><p className="pro-field-value">{String(!!user.is_banned)}</p></div>
+          <div className="pro-field"><span className="pro-field-label">is_suspended</span><p className="pro-field-value">{String(!!user.is_suspended)}</p></div>
+          <div className="pro-field"><span className="pro-field-label">is_deleted</span><p className="pro-field-value">{String(!!user.is_deleted)}</p></div>
           {user.suspended_until ? (
-            <div className="pro-field">
-              <span className="pro-field-label">Suspended until</span>
-              <p className="pro-field-value">{String(user.suspended_until)}</p>
-            </div>
+            <div className="pro-field"><span className="pro-field-label">Suspended until</span><p className="pro-field-value">{String(user.suspended_until)}</p></div>
           ) : null}
         </div>
 
-        <div className="pro-view-actions">
+        <div style={{ padding: "8px 16px 16px" }}>
+          <h3 style={{ margin: "8px 0" }}>Activity</h3>
+          {actLoading && <p className="meta">Loading activity…</p>}
+          {actError && <p className="error-banner">{actError}</p>}
+          {!actLoading && activity.length === 0 && <p className="meta">No recent activity.</p>}
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {activity.map((a) => (
+              <li key={a.id || `${a.type}-${a.created_at}`} style={{ padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <strong>{a.title || a.type}</strong>
+                <div className="meta">{a.message || ""}</div>
+                <div className="meta">{a.created_at || ""}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="pro-view-actions" style={{ flexWrap: "wrap", gap: 8, padding: 16 }}>
           {!deleted && (
             <>
               {banned ? (
-                <button type="button" className="btn btn-success" disabled={busy} onClick={() => onAction?.(user, "unban")}>
-                  Unban account
-                </button>
+                <button type="button" className="btn btn-success" disabled={busy} onClick={() => onAction?.(user, "unban")}>Unban</button>
               ) : (
-                <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onAction?.(user, "ban")}>
-                  Ban account
-                </button>
+                <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onAction?.(user, "ban")}>Ban</button>
               )}
               {suspended ? (
-                <button type="button" className="btn btn-success" disabled={busy || banned} onClick={() => onAction?.(user, "unsuspend")}>
-                  Unsuspend
-                </button>
+                <button type="button" className="btn btn-success" disabled={busy || banned} onClick={() => onAction?.(user, "unsuspend")}>Unsuspend</button>
               ) : (
-                <button type="button" className="btn btn-warn" disabled={busy || banned} onClick={() => onAction?.(user, "suspend")}>
-                  Suspend
-                </button>
+                <button type="button" className="btn btn-warn" disabled={busy || banned} onClick={() => onAction?.(user, "suspend")}>Suspend</button>
               )}
-              {(banned || suspended) && (
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onAction?.(user, "activate")}>
-                  Full activate
-                </button>
-              )}
-              {user.is_author && (
-                inactive ? (
-                  <button type="button" className="btn btn-primary" disabled={busy || banned} onClick={() => onAction?.(user, "active")}>
-                    Activate author
-                  </button>
-                ) : (
-                  <button type="button" className="btn btn-ghost" disabled={busy || banned || suspended} onClick={() => onAction?.(user, "inactive")}>
-                    Set inactive
-                  </button>
-                )
-              )}
-              <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onAction?.(user, "delete")}>
-                Soft delete
-              </button>
+              <button type="button" className="btn btn-danger" disabled={busy} onClick={() => onAction?.(user, "delete")}>Soft delete</button>
             </>
           )}
-          {deleted && (
-            <button type="button" className="btn btn-success" disabled={busy} onClick={() => onAction?.(user, "restore")}>
-              Recover account
-            </button>
-          )}
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
-            Close
-          </button>
+          <button type="button" className="btn btn-success" disabled={busy || !deleted} onClick={() => onAction?.(user, "restore")}>Recover account</button>
+          <button type="button" className="btn btn-success" disabled={busy || !banned} onClick={() => onAction?.(user, "unban")}>Unban</button>
+          <button type="button" className="btn btn-success" disabled={busy || !suspended} onClick={() => onAction?.(user, "unsuspend")}>Unsuspend</button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -233,49 +249,62 @@ function RowActions({ row, busyId, onView, onAct, showAuthorToggle }) {
   const busy = busyId === row.id;
 
   return (
-    <div className="btn-row">
+    <div className="btn-row" style={{ flexWrap: "wrap", gap: 6 }}>
       <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => onView(row)}>
         View
       </button>
       {!deleted && (
-        <>
-          {banned ? (
-            <button type="button" className="btn btn-sm btn-success" disabled={busy} onClick={() => onAct(row, "unban")}>
-              Unban
-            </button>
-          ) : (
-            <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => onAct(row, "ban")}>
-              Ban
-            </button>
-          )}
-          {suspended ? (
-            <button type="button" className="btn btn-sm btn-success" disabled={busy || banned} onClick={() => onAct(row, "unsuspend")}>
-              Unsuspend
-            </button>
-          ) : (
-            <button type="button" className="btn btn-sm btn-warn" disabled={busy || banned} onClick={() => onAct(row, "suspend")}>
-              Suspend
-            </button>
-          )}
-          {showAuthorToggle &&
-            (inactive ? (
-              <button type="button" className="btn btn-sm btn-primary" disabled={busy || banned} onClick={() => onAct(row, "active")}>
-                Activate
-              </button>
-            ) : (
-              <button type="button" className="btn btn-sm btn-ghost" disabled={busy || banned || suspended} onClick={() => onAct(row, "inactive")}>
-                Inactive
-              </button>
-            ))}
-          <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => onAct(row, "delete")}>
-            Delete
-          </button>
-        </>
-      )}
-      {deleted && (
-        <button type="button" className="btn btn-sm btn-success" disabled={busy} onClick={() => onAct(row, "restore")}>
-          Recover account
+        <button type="button" className="btn btn-sm btn-danger" disabled={busy || banned} onClick={() => onAct(row, "ban")}>
+          Ban
         </button>
+      )}
+      <button
+        type="button"
+        className="btn btn-sm btn-success"
+        disabled={busy || !banned}
+        title={banned ? "Unban this account" : "Only enabled when Banned"}
+        onClick={() => onAct(row, "unban")}
+      >
+        Unban
+      </button>
+      {!deleted && (
+        <button type="button" className="btn btn-sm btn-warn" disabled={busy || banned || suspended} onClick={() => onAct(row, "suspend")}>
+          Suspend
+        </button>
+      )}
+      <button
+        type="button"
+        className="btn btn-sm btn-success"
+        disabled={busy || !suspended}
+        title={suspended ? "Unsuspend" : "Only enabled when Suspended"}
+        onClick={() => onAct(row, "unsuspend")}
+      >
+        Unsuspend
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-success"
+        disabled={busy || !deleted}
+        title={deleted ? "Recover soft-deleted account" : "Only enabled when Deleted"}
+        onClick={() => onAct(row, "restore")}
+      >
+        Recover
+      </button>
+      {!deleted && (
+        <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => onAct(row, "delete")}>
+          Delete
+        </button>
+      )}
+      {showAuthorToggle && !deleted && (
+        inactive ? (
+          <button type="button" className="btn btn-sm btn-primary" disabled={busy || banned} onClick={() => onAct(row, "active")}>
+            Activate
+          </button>
+        ) : (
+          <button type="button" className="btn btn-sm btn-ghost" disabled={busy || banned || suspended} onClick={() => onAct(row, "inactive")}>
+            Inactive
+          </button>
+        )
       )}
     </div>
   );

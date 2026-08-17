@@ -90,13 +90,16 @@ def apply_professional_auth(main_mod) -> None:
 
     def create_user_token(user_id: int) -> str:
         # Read token_version so ban can invalidate outstanding sessions
-        rows = fetch_all(
-            "SELECT COALESCE(token_version, 0) AS token_version FROM app_users WHERE id=%s LIMIT 1",
-            (user_id,),
-        )
         tv = 0
-        if rows:
-            tv = int(_row_get(rows[0], "token_version") or 0)
+        try:
+            rows = fetch_all(
+                "SELECT COALESCE(token_version, 0) AS token_version FROM app_users WHERE id=%s LIMIT 1",
+                (user_id,),
+            )
+            if rows:
+                tv = int(_row_get(rows[0], "token_version") or 0)
+        except Exception:
+            tv = 0
         expires_at = datetime.now(timezone.utc) + timedelta(days=14)
         return _sign_token(
             {
