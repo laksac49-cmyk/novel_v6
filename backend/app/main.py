@@ -1074,6 +1074,35 @@ def admin_login(payload: AdminLoginRequest):
     }
 
 
+
+def _row_id(row: Any) -> int | None:
+    """Get numeric id from dict or sequence row."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        v = row.get("id")
+        if v is None:
+            try:
+                v = next(iter(row.values()))
+            except StopIteration:
+                return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    try:
+        return int(row[0])
+    except Exception:
+        return None
+
+
+def _find_user_id_by_email(email: str) -> int | None:
+    rows = fetch_all("SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1", (email,))
+    if not rows:
+        return None
+    return _row_id(rows[0])
+
+
 @app.post("/api/auth/google")
 def authenticate_google(payload: GoogleAuthRequest):
     google_user = _verify_google_payload(payload)
@@ -1191,20 +1220,26 @@ def authenticate_email(payload: EmailAuthRequest):
 
 @app.post("/api/auth/guest")
 def authenticate_guest(_: GuestAuthRequest):
+    """Fallback guest login (device-scoped version is applied by auth_professional)."""
     email = "guest@novel.app"
     display_name = "Guest"
-    rows = fetch_all("SELECT id FROM app_users WHERE email=%s LIMIT 1", (email,))
-    if rows:
-        user_id = rows[0]["id"]
+    rows = fetch_all("SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1", (email,))
+    user_id = _row_id(rows[0]) if rows else None
+    if user_id is not None:
         execute_write(
             """
             UPDATE app_users
-            SET provider='guest', display_name=%s, last_login_at=CURRENT_TIMESTAMP
+            SET provider='guest', display_name=%s, last_login_at=CURRENT_TIMESTAMP,
+                is_deleted=0, is_banned=0, is_suspended=0, suspended_until=NULL
             WHERE id=%s
             """,
             (display_name, user_id),
         )
     else:
+        try:
+            _ensure_user_moderation_columns()
+        except Exception:
+            pass
         user_id, _ = execute_write(
             """
             INSERT INTO app_users (email, provider, display_name, photo_url)
@@ -1212,8 +1247,12 @@ def authenticate_guest(_: GuestAuthRequest):
             """,
             (email, display_name),
         )
-
-    _assert_user_can_login(user_id)
+        if not user_id:
+            user_id = _find_user_id_by_email(email)
+        if not user_id:
+            raise HTTPException(status_code=500, detail="Could not create guest user")
+    user_id = int(user_id)
+    # Guests are never blocked by moderation leftovers
     return {
         "id": user_id,
         "email": email,
@@ -3981,10 +4020,40 @@ def post_user_wall(
     return {"ok": True, "id": row_id}
 
 
+
+def _user_moderation_status(user_id: int) -> dict[str, Any]:
+    """Fresh flags from DB after any admin action."""
+    _ensure_user_moderation_columns()
+    rows = fetch_all(
+        """
+        SELECT COALESCE(is_banned,0) AS is_banned,
+               COALESCE(is_suspended,0) AS is_suspended,
+               COALESCE(is_deleted,0) AS is_deleted,
+               suspended_until,
+               COALESCE(is_author_active,1) AS is_author_active
+        FROM app_users WHERE id=%s LIMIT 1
+        """,
+        (user_id,),
+    )
+    if not rows:
+        return {"ok": False, "error": "user not found", "id": user_id}
+    r = rows[0]
+    return {
+        "ok": True,
+        "id": user_id,
+        "is_banned": bool(int(_row_get(r, "is_banned") or 0)),
+        "is_suspended": bool(int(_row_get(r, "is_suspended") or 0)),
+        "is_deleted": bool(int(_row_get(r, "is_deleted") or 0)),
+        "suspended_until": str(_row_get(r, "suspended_until") or "") or None,
+        "is_author_active": bool(int(_row_get(r, "is_author_active") if _row_get(r, "is_author_active") is not None else 1)),
+    }
+
+
 # ----- Admin: users list + ban / unban -----
 
 @app.get("/api/admin/users")
 def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
+    _ensure_user_moderation_columns()
     try:
         rows = fetch_all(
             """
@@ -4030,21 +4099,16 @@ def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
 
 @app.post("/api/admin/users/{user_id}/ban")
 def admin_ban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
-    try:
-        execute_write("ALTER TABLE app_users ADD COLUMN is_banned INT NOT NULL DEFAULT 0", ())
-    except Exception:
-        pass
+    _ensure_user_moderation_columns()
     execute_write("UPDATE app_users SET is_banned=1 WHERE id=%s", (user_id,))
-    return {"ok": True, "is_banned": True}
+    return _user_moderation_status(user_id)
 
 
 @app.post("/api/admin/users/{user_id}/unban")
 def admin_unban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
-    try:
-        execute_write("UPDATE app_users SET is_banned=0 WHERE id=%s", (user_id,))
-    except Exception:
-        pass
-    return {"ok": True, "is_banned": False}
+    _ensure_user_moderation_columns()
+    execute_write("UPDATE app_users SET is_banned=0 WHERE id=%s", (user_id,))
+    return _user_moderation_status(user_id)
 
 
 
@@ -4085,7 +4149,7 @@ def admin_activate_user(user_id: int, _: dict[str, Any] = Depends(require_admin)
     """Clear ban + suspend flags — full access restored."""
     try:
         execute_write(
-            "UPDATE app_users SET is_banned=0, is_suspended=0 WHERE id=%s",
+            "UPDATE app_users SET is_banned=0, is_suspended=0, is_deleted=0, suspended_until=NULL WHERE id=%s",
             (user_id,),
         )
     except Exception:
@@ -4100,7 +4164,7 @@ def admin_delete_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
     """Soft-delete: keep row, flag is_deleted so login is permanently blocked until restored."""
     _ensure_user_moderation_columns()
     execute_write(
-        "UPDATE app_users SET is_deleted=1, is_banned=1 WHERE id=%s",
+        "UPDATE app_users SET is_deleted=1 WHERE id=%s",
         (user_id,),
     )
     return {"ok": True, "is_deleted": True}
@@ -4113,7 +4177,7 @@ def admin_restore_user(user_id: int, _: dict[str, Any] = Depends(require_admin))
         "UPDATE app_users SET is_deleted=0, is_banned=0, is_suspended=0, suspended_until=NULL WHERE id=%s",
         (user_id,),
     )
-    return {"ok": True, "is_deleted": False}
+    return _user_moderation_status(user_id)
 
 
 @app.post("/api/admin/users/{user_id}/author-active")

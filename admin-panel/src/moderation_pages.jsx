@@ -77,7 +77,7 @@ function localPatchForAction(action) {
   if (action === "suspend") return { is_suspended: true };
   if (action === "unsuspend") return { is_suspended: false, suspended_until: null };
   if (action === "activate") return { is_banned: false, is_suspended: false, suspended_until: null };
-  if (action === "delete") return { is_deleted: true, is_banned: true };
+  if (action === "delete") return { is_deleted: true };
   if (action === "restore")
     return {
       is_deleted: false,
@@ -329,8 +329,16 @@ export function AuthorsPage({ authors: _authorsProp, search }) {
     try {
       const res = await runUserAction(id, action);
       if (res === null) return;
-      // Immediate UI flip (status column + button text)
-      patchLocal(id, localPatchForAction(action));
+      // Prefer live flags from API response (DB truth), fall back to local patch
+      const fromApi = {};
+      if (res && typeof res === "object") {
+        if ("is_banned" in res) fromApi.is_banned = !!res.is_banned;
+        if ("is_suspended" in res) fromApi.is_suspended = !!res.is_suspended;
+        if ("is_deleted" in res) fromApi.is_deleted = !!res.is_deleted;
+        if ("suspended_until" in res) fromApi.suspended_until = res.suspended_until;
+        if ("is_author_active" in res) fromApi.is_author_active = !!res.is_author_active;
+      }
+      patchLocal(id, { ...localPatchForAction(action), ...fromApi });
       setSuccess(`Author #${id}: ${ACTION_LABELS[action] || action}`);
       // Confirm from DB
       await load();
@@ -554,7 +562,15 @@ export function UsersPage({ profile, supportRequests, onUpdateSupport }) {
     try {
       const res = await runUserAction(id, action);
       if (res === null) return;
-      patchLocal(id, localPatchForAction(action));
+      const fromApi = {};
+      if (res && typeof res === "object") {
+        if ("is_banned" in res) fromApi.is_banned = !!res.is_banned;
+        if ("is_suspended" in res) fromApi.is_suspended = !!res.is_suspended;
+        if ("is_deleted" in res) fromApi.is_deleted = !!res.is_deleted;
+        if ("suspended_until" in res) fromApi.suspended_until = res.suspended_until;
+        if ("is_author_active" in res) fromApi.is_author_active = !!res.is_author_active;
+      }
+      patchLocal(id, { ...localPatchForAction(action), ...fromApi });
       setSuccess(`User #${id}: ${ACTION_LABELS[action] || action}`);
       await load();
     } catch (e) {

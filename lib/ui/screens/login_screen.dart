@@ -262,13 +262,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed:
                               _busy ? null : () => _openEmailAuth(register: false),
                         ),
-                        const SizedBox(height: 12),
-                        _LoginButton(
-                          icon: Icons.person_add_alt_1_outlined,
-                          label: 'Create account with Email',
-                          onPressed:
-                              _busy ? null : () => _openEmailAuth(register: true),
-                        ),
+                        // TEMPORARILY HIDDEN — Create account with Email
+                        // const SizedBox(height: 12),
+                        // _LoginButton(
+                        //   icon: Icons.person_add_alt_1_outlined,
+                        //   label: 'Create account with Email',
+                        //   onPressed:
+                        //       _busy ? null : () => _openEmailAuth(register: true),
+                        // ),
                         const SizedBox(height: 12),
                         _LoginButton(
                           icon: Icons.person_outline,

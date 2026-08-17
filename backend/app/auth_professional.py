@@ -294,16 +294,30 @@ def apply_professional_auth(main_mod) -> None:
             device_id = secrets.token_hex(16)
 
         email = f"guest_{device_id[:32]}@novel.app"
-        rows = fetch_all("SELECT id FROM app_users WHERE email=%s LIMIT 1", (email,))
+        rows = fetch_all("SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1", (email,))
+        user_id = None
         if rows:
-            user_id = int(rows[0]["id"] if isinstance(rows[0], dict) else rows[0][0])
+            r0 = rows[0]
+            user_id = int(r0["id"] if isinstance(r0, dict) else r0[0])
+            # Always clear moderation so guest can never get stuck after admin delete/ban
             try:
                 execute_write(
-                    "UPDATE app_users SET provider='guest', device_id=%s, last_login_at=CURRENT_TIMESTAMP WHERE id=%s",
+                    """
+                    UPDATE app_users
+                    SET provider='guest', device_id=%s, last_login_at=CURRENT_TIMESTAMP,
+                        is_deleted=0, is_banned=0, is_suspended=0, suspended_until=NULL
+                    WHERE id=%s
+                    """,
                     (device_id, user_id),
                 )
             except Exception:
-                pass
+                try:
+                    execute_write(
+                        "UPDATE app_users SET provider='guest', device_id=%s, last_login_at=CURRENT_TIMESTAMP WHERE id=%s",
+                        (device_id, user_id),
+                    )
+                except Exception:
+                    pass
         else:
             user_id, _ = execute_write(
                 """
@@ -312,8 +326,16 @@ def apply_professional_auth(main_mod) -> None:
                 """,
                 (email, device_id),
             )
+            if not user_id:
+                rows2 = fetch_all("SELECT id FROM app_users WHERE LOWER(email)=%s LIMIT 1", (email,))
+                if rows2:
+                    r0 = rows2[0]
+                    user_id = int(r0["id"] if isinstance(r0, dict) else r0[0])
+            if not user_id:
+                raise HTTPException(status_code=500, detail="Could not create guest account")
 
-        _assert_user_can_login(user_id)
+        user_id = int(user_id)
+        # Do NOT call _assert_user_can_login — guests must always be able to continue
         return {
             "id": user_id,
             "email": email,
@@ -401,12 +423,26 @@ def apply_professional_auth(main_mod) -> None:
     @app.post("/api/admin/users/{user_id}/activate")
     def admin_activate_user(user_id: int):
         _set_flag(user_id, is_banned=0, is_suspended=0, is_deleted=0, suspended_until=None)
-        return {"ok": True}
+        return {
+            "ok": True,
+            "id": user_id,
+            "is_deleted": False,
+            "is_banned": False,
+            "is_suspended": False,
+            "suspended_until": None,
+        }
 
     @app.post("/api/admin/users/{user_id}/restore")
     def admin_restore_user(user_id: int):
-        _set_flag(user_id, is_deleted=0, is_banned=0, is_suspended=0)
-        return {"ok": True}
+        _set_flag(user_id, is_deleted=0, is_banned=0, is_suspended=0, suspended_until=None)
+        return {
+            "ok": True,
+            "id": user_id,
+            "is_deleted": False,
+            "is_banned": False,
+            "is_suspended": False,
+            "suspended_until": None,
+        }
 
     # Also ensure DELETE soft-delete bumps version — leave original delete route
     LOGGER.info("Professional auth hardening applied (email+password, guest device, token_version)")
